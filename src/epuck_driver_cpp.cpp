@@ -36,7 +36,7 @@
 #define READ_TIMEOUT_USEC 0
 #define MAX_CONSECUTIVE_TIMEOUT 3
 
-#define SENSORS_NUM 7
+#define SENSORS_NUM 8
 #define ACCELEROMETER 0
 #define MOTOR_SPEED 1
 #define FLOOR 2
@@ -44,6 +44,7 @@
 #define MOTOR_POSITION 4
 #define MICROPHONE 5
 #define CAMERA 6
+#define GYROSCOPE 7
 
 #define ACTUATORS_NUM 3
 #define MOTORS 0
@@ -54,7 +55,7 @@
 #define CAM_MODE_GRAY 0
 #define CAM_MODE_RGB 1
 
-#define WHEEL_DIAMETER 4        // cm.
+#define WHEEL_DIAMETER 4.1        // cm.
 #define WHEEL_SEPARATION 5.3    // Separation between wheels (cm).
 #define WHEEL_DISTANCE 0.053    // Distance between wheels in meters (axis length); it's the same value as "WHEEL_SEPARATION" but expressed in meters.
 #define WHEEL_CIRCUMFERENCE ((WHEEL_DIAMETER*M_PI)/100.0)    // Wheel circumference (meters).
@@ -82,6 +83,7 @@ int consecutiveReadTimeout = 0;
 int camWidth, camHeight, camZoom, camMode, camXoffset, camYoffset;
 
 int accData[3];
+int gyroData[3];
 int motorSpeedData[2];
 int floorData[5];
 int proxData[8];
@@ -408,7 +410,14 @@ void updateSensorsData() {
             accData[2] = (unsigned char)robotToPcBuff[bufIndex+4] | robotToPcBuff[bufIndex+5]<<8;
             bufIndex += 6;
             if(DEBUG_UPDATE_SENSORS_DATA)std::cout << "[" << epuckname << "] " << "acc: " << accData[0] << "," << accData[1] << "," << accData[2] << std::endl;
+            if(enabledSensors[GYROSCOPE]) {
+                gyroData[0] = (unsigned char)robotToPcBuff[bufIndex] | robotToPcBuff[bufIndex+1]<<8;
+                gyroData[1] = (unsigned char)robotToPcBuff[bufIndex+2] | robotToPcBuff[bufIndex+3]<<8;
+                gyroData[2] = (unsigned char)robotToPcBuff[bufIndex+4] | robotToPcBuff[bufIndex+5]<<8;
+                bufIndex += 6;
+            }
         }
+
         if(enabledSensors[MOTOR_SPEED]) {
             motorSpeedData[0] = (unsigned char)robotToPcBuff[bufIndex] | robotToPcBuff[bufIndex+1]<<8;
             motorSpeedData[1] = (unsigned char)robotToPcBuff[bufIndex+2] | robotToPcBuff[bufIndex+3]<<8;
@@ -948,9 +957,15 @@ void updateRosInfo() {
         accelMsg.linear_acceleration_covariance[8] = 0.01;
         if(DEBUG_ACCELEROMETER)std::cout << "[" << epuckname << "] " << "accel raw: " << accData[0] << ", " << accData[1] << ", " << accData[2] << std::endl;
         if(DEBUG_ACCELEROMETER)std::cout << "[" << epuckname << "] " << "accel (m/s2): " << ((accData[0]-2048.0)/800.0*9.81) << ", " << ((accData[1]-2048.0)/800.0*9.81) << ", " << ((accData[2]-2048.0)/800.0*9.81) << std::endl;
-        accelMsg.angular_velocity.x = 0;
-        accelMsg.angular_velocity.y = 0;
-        accelMsg.angular_velocity.z = 0;
+        if(enabledSensors[GYROSCOPE]){
+            accelMsg.angular_velocity.x = (float) gyroData[0]*0.0001527163; // 8.75 mdps/digit
+            accelMsg.angular_velocity.y = (float) gyroData[1]*0.0001527163;
+            accelMsg.angular_velocity.z = (float) gyroData[2]*0.0001527163;
+        } else {
+            accelMsg.angular_velocity.x = 0;
+            accelMsg.angular_velocity.y = 0;
+            accelMsg.angular_velocity.z = 0;
+        }   
         accelMsg.angular_velocity_covariance[0] = 0.01;
         accelMsg.angular_velocity_covariance[1] = 0.0;
         accelMsg.angular_velocity_covariance[2] = 0.0;
@@ -1062,16 +1077,16 @@ void updateRosInfo() {
 
 void handlerVelocity(const geometry_msgs::Twist::ConstPtr& msg) {
     // Controls the velocity of each wheel based on linear and angular velocities.
-    double linear = msg->linear.x/3;    // Divide by 3 to adapt the values received from the rviz "teleop" module that are too high.
-    double angular = msg->angular.z/3;
+    double linear = msg->linear.x;    // Divide by 3 to adapt the values received from the rviz "teleop" module that are too high.
+    double angular = msg->angular.z;
 
     // Kinematic model for differential robot.
-    double wl = (linear - (WHEEL_SEPARATION / 2.0) * angular) / WHEEL_DIAMETER;
-    double wr = (linear + (WHEEL_SEPARATION / 2.0) * angular) / WHEEL_DIAMETER;
+    double wl = 100*(linear - (WHEEL_SEPARATION / 200.0) * angular) / WHEEL_DIAMETER;
+    double wr = 100*(linear + (WHEEL_SEPARATION / 200.0) * angular) / WHEEL_DIAMETER;
 
     // At input 1000, angular velocity is 1 cycle / s or  2*pi/s.
-    speedLeft = int(wl * 1000.0);
-    speedRight = int(wr * 1000.0);
+    speedLeft = int(wl  * 1000.0/(2*M_PI));
+    speedRight = int(wr * 1000.0/(2*M_PI));
     changedActuators[MOTORS] = true;
 
     if(DEBUG_SPEED_RECEIVED)std::cout << "[" << epuckname << "] " << "new speed: " << speedLeft << ", " << speedRight << std::endl;
@@ -1127,6 +1142,7 @@ int main(int argc,char *argv[]) {
     np.param("ypos", init_ypos, 0.0);
     np.param("theta", init_theta, 0.0);
     np.param("accelerometer", enabledSensors[ACCELEROMETER], false);
+    np.param("gyroscope", enabledSensors[GYROSCOPE], false);
     np.param("motor_speed", enabledSensors[MOTOR_SPEED], false);
     np.param("floor", enabledSensors[FLOOR], false);
     np.param("proximity", enabledSensors[PROXIMITY], false);
@@ -1176,6 +1192,7 @@ int main(int argc,char *argv[]) {
         std::cout << "[" << epuckname << "] " << "epuck name: " << epuckname << std::endl;
         std::cout << "[" << epuckname << "] " << "init pose: " << init_xpos << ", " << init_ypos << ", " << theta << std::endl;
         std::cout << "[" << epuckname << "] " << "accelerometer enabled: " << enabledSensors[ACCELEROMETER] << std::endl;
+        std::cout << "[" << epuckname << "] " << "gyroscope enabled: " << enabledSensors[GYROSCOPE] << std::endl;
         std::cout << "[" << epuckname << "] " << "motor speed enabled: " << enabledSensors[MOTOR_SPEED] << std::endl;
         std::cout << "[" << epuckname << "] " << "floor enabled: " << enabledSensors[FLOOR] << std::endl;
         std::cout << "[" << epuckname << "] " << "proximity enabled: " << enabledSensors[PROXIMITY] << std::endl;
@@ -1206,9 +1223,16 @@ int main(int argc,char *argv[]) {
         pcToRobotBuff[bufIndex] = -'a';
         bufIndex++;
         bytesToReceive += 6;
-        
         accelPublisher = n.advertise<sensor_msgs::Imu>("accel", 10);
+        if(enabledSensors[GYROSCOPE]) {
+            pcToRobotBuff[bufIndex] = -'g';
+            bufIndex++;
+            bytesToReceive += 6;
+        }
+
     }
+
+
     if(enabledSensors[MOTOR_SPEED]) {
         pcToRobotBuff[bufIndex] = -'E';
         bufIndex++;
