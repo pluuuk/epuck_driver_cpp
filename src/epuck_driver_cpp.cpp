@@ -109,7 +109,7 @@ visualization_msgs::Marker microphoneMsg;
 ros::Publisher floorPublisher;
 visualization_msgs::Marker floorMsg;
 
-ros::Subscriber cmdVelSubscriber, cmdLedSubscriber;
+ros::Subscriber cmdVelSubscriber, cmdLedSubscriber, cmdOdomSubscriber;
 
 double leftStepsDiff = 0, rightStepsDiff = 0;
 double leftStepsPrev = 0, rightStepsPrev = 0;
@@ -1093,6 +1093,23 @@ void handlerVelocity(const geometry_msgs::Twist::ConstPtr& msg) {
     
 }
 
+void handlerReset(const nav_msgs::Odometry::ConstPtr& msg) {
+    // Controls the velocity of each wheel based on linear and angular velocities.
+    double x = msg->pose.pose.position.x;    // Divide by 3 to adapt the values received from the rviz "teleop" module that are too high.
+    double y = msg->pose.pose.position.y;
+    tf::Quaternion q(
+        msg->pose.pose.orientation.x,
+        msg->pose.pose.orientation.y,
+        msg->pose.pose.orientation.z,
+        msg->pose.pose.orientation.w);
+    tf::Matrix3x3 m(q);
+    double roll, pitch, yaw;
+    m.getRPY(roll, pitch, yaw);
+    xPos = x;
+    yPos = y;
+    theta = yaw;
+}
+
 void handlerLED(const std_msgs::UInt8MultiArray::ConstPtr& msg) {
     // Controls the state of each LED on the standard robot
     for (int i = 0; i < LED_NUMBER; i++)
@@ -1326,6 +1343,8 @@ int main(int argc,char *argv[]) {
     */
     cmdVelSubscriber = n.subscribe("mobile_base/cmd_vel", 10, handlerVelocity);
     cmdLedSubscriber = n.subscribe("mobile_base/cmd_led", 10, handlerLED);
+    cmdOdomSubscriber = n.subscribe("odom/odom_reset", 10, handlerReset);
+    
 
     if(enabledSensors[CAMERA]) {
         imageSize = camWidth*camHeight*(camMode+1)+3; // The image data header contains "mode", "width", "height" in the first 3 bytes.

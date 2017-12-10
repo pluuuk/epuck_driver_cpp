@@ -57,10 +57,5 @@
         <param name="cam_y_offset" value="$(arg cam_y_offset)"/>   
         <!--<param name="ros_rate" value="$(arg ros_rate)"/> -->
     </node>
-    
-    <param name="robot_description" textfile="$(find epuck_driver_cpp)/urdf/epuck_urdf.xml"/>
-    <node name="epuck_state_publisher" pkg="robot_state_publisher" type="state_publisher">
-        <param name="tf_prefix" value="$(arg epuck_name)" />
-    </node>
 
 </launch>
